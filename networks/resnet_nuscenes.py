@@ -7,7 +7,7 @@ class FCModel(nn.Module):
     def __init__(self, pretrained=True, input_n=1, out_features=12) -> None:
         super().__init__()
 
-        self.fc = nn.Linear(in_features=8, out_features=1000)
+        self.fc = nn.Linear(in_features=2*input_n-2, out_features=1000)
         self.relu = nn.ReLU(inplace=True)
 
         self.final_fc = nn.Linear(in_features=1000, out_features=out_features)
@@ -100,27 +100,32 @@ class ResNetModel_C(nn.Module): # Coordinate
         else:
             self.model = models.resnet152(weights = weights)
 
-        self.model.conv1 = nn.Conv2d(3*input_n, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        #self.model.conv1 = nn.Conv2d(3*input_n, 64, kernel_size=7, stride=2, padding=3, bias=False)
         #self.model.fc = nn.Linear(in_features=2048, out_features=256)
-        self.coor_fc = nn.Linear(in_features=2*input_n-2, out_features=1000)
+        self.coor_fc = nn.Linear(in_features=2*input_n-2, out_features=512)
         self.relu = nn.ReLU(inplace=True)
 
-        self.final_fc = nn.Linear(in_features=2*1000, out_features=out_features)
+        #self.fc0 = nn.Linear(in_features=1000, out_features=out_features)
+        #self.fc1 = nn.Linear(in_features=1000, out_features=out_features)
+        self.fc = nn.Linear(in_features=512, out_features=out_features)
 
     def forward(self, x: Tensor) -> Tensor:
-        x[0] = x[0].flatten(1, 2)
+        #x[0] = x[0].flatten(1, 2)
 
-        x[0] = self.model(x[0])
-        x[1] = self.coor_fc(x[1]) 
+        #x[0] = self.model(x[0])
+        x[1] = self.coor_fc(x[1])
 
-        x = torch.cat((x[0], x[1]), dim=1)
-        #x = x[0] * x[1]
+        x_fusion = x[1] # torch.cat((x[0], x[1]), dim=1)
+        x_fusion = self.relu(x_fusion)
+        x_fusion = self.fc(x_fusion)    # 图像和历史路径融合预测的未来路径
 
-        x = self.relu(x)
+        #x[0] = self.relu(x[0])
+        #x[0] = self.fc0(x[0])   # 只用图像预测的未来路径
+        #x[1] = self.relu(x[1])
+        #x[1] = self.fc1(x[1])   # 只用历史路径预测的未来路径
 
-        x = self.final_fc(x)
-
-        return x
+        #return torch.stack((x[0], x[1], x_fusion), dim=1)
+        return x_fusion
 
 
 def resnet_model(type=50, pretrained=True, out_features=12):
@@ -140,11 +145,11 @@ def resnet_model(type=50, pretrained=True, out_features=12):
     return model
 
 
-# # 测试网络
-# if __name__ == '__main__':
-#     model = ResNetModel_C()
-#     loss_function = torch.nn.L1Loss()
-#     input = torch.FloatTensor([1,2,3])
-#     target = torch.FloatTensor([4,8,10])
-#     loss = loss_function(input, target)
-#     print(loss.item())
+# 测试网络
+if __name__ == '__main__':
+    model = ResNetModel_C()
+    loss_function = torch.nn.L1Loss()
+    input = torch.FloatTensor([1,2,3])
+    target = torch.FloatTensor([4,8,10])
+    loss = loss_function(input, target)
+    print(loss.item())

@@ -93,6 +93,8 @@ def eval(checkpoint_path, dataroot):
         intrinsics = batch['intrinsics']
         extrinsics = batch['extrinsics']
         future_egomotion = batch['future_egomotion']   # shape: [batch_size, sequence length, 6] 例子：[1, 9, 6].   但加载数据之后，stp3模型只会用到B,T,3(只用x,y,z，不用旋转的量)
+        # 这个future_egomotion是stp dataloader处理过的结果
+        # 后一帧相对前一帧的，而不是后面每一帧相对于第一帧
         # 第二个维度是9是因为过去有3帧，未来有6帧
         # 第三个维度是6是因为6-dof pose vector comprising translation components (tx, ty, tz) and rotation components (rx, ry, rz)注意这里不是四元数而是欧拉角
         command = batch['command']
@@ -118,17 +120,22 @@ def eval(checkpoint_path, dataroot):
         
         # 在这里修改ego vehicle的未来运动信息，以满足你的模型的输入要求
         # 对于周博的模型，只接受egomotion shape as (batch_size, n_future_frames*2),
-        f233 = future_egomotion[:, :3, :2].squeeze(0).contiguous()  # shape: (input_n, 2) 例子：[3(前n帧), 2（x,y）]
-        future_egomotion2 = torch.tensor([[f233[1,0]-f233[0,0],f233[1,1]-f233[0,1],f233[2,0]-f233[1,0],f233[2,1]-f233[1,1]]], dtype=torch.float32).to(device)  # shape: (B, 4) 1, 4, 1
-
+        f233 = future_egomotion[:, :3, :2].squeeze(0).contiguous()  # shape: (input_n, 2) 例子：[3(前n帧), 2（x,y）], 这个变量名是瞎取的
+        # 在这下面改变future_egomotion2的形状，以满足你的模型的输入要求
+        future_egomotion2 = torch.tensor([[f233[0,0],f233[0,1],f233[1,0],f233[1,1],f233[2,0],f233[2,1]]], dtype=torch.float32).to(device) # shape: (B, 6，1) 例子:1, 6, 1
+        
         # 将处理后的输入数据传入模型
         output2 = model2([image2.float(), future_egomotion2.float()]) # 这里是第二个模型的输出, 对于周博的模型，输出形状是[2xpredict_n, 1]
-
         # 在这里修改以处理模型的输出，使其满足stp3模型的轨迹输出要求，即[batch_size, n_future_frames, 3]
         # 创建一个形状为6x1的0值tensor
         zeros_tensor = torch.zeros(6, 1).to(device)
+        
         # 沿着最后一个维度拼接  
-        final_traj_ours = torch.cat((output2.reshape([6,2]), zeros_tensor), dim=-1).to(device).unsqueeze(0)  # shape should be torch.Size([1, 6(未来帧数), 3(x,y,z)])
+        # 如果模型输出的轨迹是描述前后两帧的相对运动，则用下面这行代码
+        final_traj_ours = torch.cat((torch.cumsum(output2.reshape([6,2]), dim=0), zeros_tensor), dim=-1).to(device).unsqueeze(0)  # shape should be torch.Size([1, 6(未来帧数), 3(x,y,z)])
+        # 如果模型输出的轨迹是描述未来第i帧相对于当前这帧的相对运动，则用下面这行代码
+        #final_traj_ours = torch.cat((output2.reshape([6,2]), zeros_tensor), dim=-1).to(device).unsqueeze(0)
+        
         ###################################################################################
 
         n_present = model.receptive_field
@@ -171,13 +178,13 @@ def eval(checkpoint_path, dataroot):
                 commands=command,
                 target_points=target_points
             )
-
             occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),
                                          labels['pedestrian'][:, n_present:].squeeze(2))
             for i in range(future_second):
                 cur_time = (i+1)*2
                 ###############################################################################################################################
                 # 在这里切换输出stp3的碰撞率还是你的模型的碰撞率
+                # labels['gt_trajectory'][:,1:cur_time+1]表示取第二个time step到当前这个step
                 #metric_planning_val[i](final_traj_stp3[:,:cur_time].detach(), labels['gt_trajectory'][:,1:cur_time+1], occupancy[:,:cur_time])
                 metric_planning_val[i](final_traj_ours[:,:cur_time].detach(), labels['gt_trajectory'][:,1:cur_time+1], occupancy[:,:cur_time])
                 ###############################################################################################################################

@@ -18,6 +18,7 @@ from stp3.utils.tools import ( gen_dx_bx, get_nusc_maps)
 #########################################################
 # 为了移植resnet/你的模型需要额外加载的库
 import torchvision.transforms as tfs
+from nuscenes.utils.geometry_utils import transform_matrix
 #########################################################
 
 from stp3.utils.geometry import (
@@ -115,6 +116,12 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         return scenes
 
     def prepro(self):
+        """
+        Returns
+        -------
+            samples: 所有时间戳下的带标注的关键帧
+
+        """
         samples = [samp for samp in self.nusc.sample]
 
         # remove samples that aren't in this split
@@ -392,6 +399,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         return segmentation, instance, pedestrian, instance_map
 
     def get_future_egomotion(self, rec, index):
+        # 感觉这个函数的作用是给出t+1时刻相对于t时刻的x,y,z,和三个欧拉角
         rec_t0 = rec
 
         # Identity
@@ -399,15 +407,20 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         if index < len(self.ixes) - 1:
             rec_t1 = self.ixes[index + 1]
-
+            ################################################################################################################
+            # lidar_sample_data = self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])      # rec是token
+            # sd_cs = self.nusc.get("calibrated_sensor", lidar_sample_data["calibrated_sensor_token"])
+            # sensor_from_ego = transform_matrix(sd_cs["translation"], Quaternion(sd_cs["rotation"]), inverse=True)
+            ################################################################################################################
             if rec_t0['scene_token'] == rec_t1['scene_token']:
                 egopose_t0 = self.nusc.get(
                     'ego_pose', self.nusc.get('sample_data', rec_t0['data']['LIDAR_TOP'])['ego_pose_token']
                 )
+                # print("AAAAAAAAA",egopose_t0)
                 egopose_t1 = self.nusc.get(
                     'ego_pose', self.nusc.get('sample_data', rec_t1['data']['LIDAR_TOP'])['ego_pose_token']
                 )
-
+                # print("BBBBBBBBBB",egopose_t1)
                 egopose_t0 = convert_egopose_to_matrix_numpy(egopose_t0)  # t_0时刻的4x4 rotation+translation matrix
                 egopose_t1 = convert_egopose_to_matrix_numpy(egopose_t1)  # t_1时刻的4x4 rotation+translation matrix
 
@@ -419,6 +432,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         # Convert to 6DoF vector
         future_egomotion = mat2pose_vec(future_egomotion)
+        # print("CCCCCCCCCCC",future_egomotion.unsqueeze(0))
         return future_egomotion.unsqueeze(0)
 
     def get_trajectory_sampling(self, rec=None, sample_indice=None):
@@ -548,12 +562,12 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             if index < len(self.ixes):
                 rec_future = self.ixes[index]
 
-                egopose_future = get_global_pose(rec_future, self.nusc, inverse=False)
+                egopose_future = get_global_pose(rec_future, self.nusc, inverse=False) # 得到
 
                 egopose_future = egopose_cur.dot(egopose_future)
                 theta = quaternion_yaw(Quaternion(matrix=egopose_future))
 
-                origin = np.array(egopose_future[:3, 3])
+                origin = np.array(egopose_future[:3, 3])   # 取
 
                 gt_trajectory[i, :] = [origin[0], origin[1], theta]
 
@@ -666,7 +680,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             data['hdmap'].append(hd_map_feature)
             data['indices'].append(index_t)
 
-            if i == self.cfg.TIME_RECEPTIVE_FIELD-1:
+            if i == self.cfg.TIME_RECEPTIVE_FIELD-1:   # 当循环到当前帧时
                 gt_trajectory, command = self.get_gt_trajectory(rec, index_t)
                 data['gt_trajectory'] = torch.from_numpy(gt_trajectory).float()
                 data['command'] = command

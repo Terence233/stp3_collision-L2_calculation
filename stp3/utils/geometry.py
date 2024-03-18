@@ -69,18 +69,18 @@ def convert_egopose_to_matrix_numpy(egopose):
     return transformation_matrix
 
 def get_global_pose(rec, nusc, inverse=False):
-    lidar_sample_data = nusc.get('sample_data', rec['data']['LIDAR_TOP'])
+    lidar_sample_data = nusc.get('sample_data', rec['data']['LIDAR_TOP'])      # rec是token
 
     sd_ep = nusc.get("ego_pose", lidar_sample_data["ego_pose_token"])
     sd_cs = nusc.get("calibrated_sensor", lidar_sample_data["calibrated_sensor_token"])
     if inverse is False:
         global_from_ego = transform_matrix(sd_ep["translation"], Quaternion(sd_ep["rotation"]), inverse=False)
         ego_from_sensor = transform_matrix(sd_cs["translation"], Quaternion(sd_cs["rotation"]), inverse=False)
-        pose = global_from_ego.dot(ego_from_sensor)
+        pose = global_from_ego.dot(ego_from_sensor) # 得到从 sensor 坐标系到全局坐标系的变换矩阵 pose
     else:
         sensor_from_ego = transform_matrix(sd_cs["translation"], Quaternion(sd_cs["rotation"]), inverse=True)
         ego_from_global = transform_matrix(sd_ep["translation"], Quaternion(sd_ep["rotation"]), inverse=True)
-        pose = sensor_from_ego.dot(ego_from_global)
+        pose = sensor_from_ego.dot(ego_from_global) # 得到从全局坐标系到 sensor 坐标系的逆变换矩阵 pose
     return pose
 
 def invert_matrix_egopose_numpy(egopose):
